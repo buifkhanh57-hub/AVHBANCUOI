@@ -121,7 +121,11 @@ export async function runAgent(
   // The agent uses the same backend as the customer-facing chat endpoint
   // so configuration is centralized in src/lib/ai-client.ts.
   const backend = detectBackend()
-  const model = options?.model || (backend === 'groq' ? (process.env.GROQ_MODEL || 'groq/compound') : 'glm-5.2')
+  // Default model:
+  // - Groq: 'llama-3.3-70b-versatile' (fast + smart)
+  // - z.ai: 'glm-5.2' (sandbox SDK default)
+  // Operator can override via options.model or GROQ_MODEL env var.
+  const model = options?.model || (backend === 'groq' ? (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile') : 'glm-5.2')
   const thinking = options?.thinking ?? true
 
   // ── AUTO-READ FILES mentioned in the user's message ────────────────
