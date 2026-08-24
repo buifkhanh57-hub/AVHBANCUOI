@@ -58,12 +58,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Thiếu message' }, { status: 400 })
   }
   const history = Array.isArray(body.history) ? body.history : []
-  const model = body.model || 'glm-5.2'
+  // Pass model + thinking as options to runAgent. If not specified, runAgent
+  // picks the right default based on the AI backend (Groq → llama-3.3-70b,
+  // z.ai → glm-5.2). Setting 'glm-5.2' here would force the z.ai model which
+  // fails on Groq with 404 error.
+  const model = body.model
   const thinking = body.thinking !== false  // default true (thinking ON)
 
   // ── Run agent ───────────────────────────────────────────────────────
   try {
-    const result = await runAgent(String(body.message), history, { model, thinking })
+    const result = await runAgent(String(body.message), history, model ? { model, thinking } : { thinking })
     await logInfo('system', `AI Dev Agent executed by ${auth.email}`, JSON.stringify({
       messageLen: String(body.message).length,
       actionCount: result.actions.length,
