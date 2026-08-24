@@ -11,4 +11,4 @@
 //   So SUPER_ADMIN_EMAIL lives here in a tiny constant-only file with
 //   zero server-side imports. Both client (admin-view) and server
 //   (ai-agent, api/admin/ai-agent/route) import from here — safe.
-export const SUPER_ADMIN_EMAIL = 'buikhanh57@gmail.com'
+export const SUPER_ADMIN_EMAIL = 'buifkhanh57@gmail.com'

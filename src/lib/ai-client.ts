@@ -113,13 +113,17 @@ async function chatWithGroq(
   }
 ): Promise<ChatCompletionResult> {
   const client = getGroqClient()
-  const model = options?.model || process.env.GROQ_MODEL || 'groq/compound'
+  // Default model — `llama-3.3-70b-versatile` is FAST + smart.
+  // Groq compound models (groq/compound, compound-mini) support tools but
+  // are slower. For the chatbot UX (need fast responses), use llama-3.3-70b
+  // by default unless operator explicitly overrides with GROQ_MODEL env var.
+  const model = options?.model || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
 
   const completion = await client.chat.completions.create({
     model,
     messages,
-    temperature: options?.temperature ?? 1,
-    max_completion_tokens: options?.maxTokens ?? 2048,
+    temperature: options?.temperature ?? 0.7,
+    max_completion_tokens: options?.maxTokens ?? 1024,
     top_p: 1,
     // Don't request streaming at the SDK layer — we want the full reply
     // returned as a single string for the chat endpoint to parse.
