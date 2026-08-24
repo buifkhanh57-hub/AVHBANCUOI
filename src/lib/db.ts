@@ -6,55 +6,62 @@ const globalForPrisma = globalThis as unknown as {
 
 // ── Prisma + Supabase pooler (PgBouncer) compatibility ───────────────────
 //
-// Supabase's connection pooler (port 6543) runs PgBouncer in transaction mode.
-// This causes 2 issues:
+// This module ensures the DATABASE_URL is properly formatted for Prisma +
+// Supabase's connection pooler (PgBouncer in transaction mode on port 6543).
 //
-// 1. Prepared statements don't work (PgBouncer routes each transaction to a
-//    different backend connection, but prepared statements are connection-scoped).
-//    Fix: append ?pgbouncer=true&statement_cache_size=0 to DATABASE_URL.
-//
-// 2. Password with special chars (@, #, ?, /, etc.) breaks Prisma's URL
-//    parser. The connection string format is:
-//      postgresql://USER:PASSWORD@HOST:PORT/DATABASE
-//    If PASSWORD contains '@', Prisma parses the URL wrong.
-//    Fix: URL-encode the password.
-//
-// This module updates process.env.DATABASE_URL BEFORE PrismaClient is
-// instantiated. This works because Prisma reads the env var at client init
-// time, not at module import time.
+// It handles:
+// 1. Password encoding: if the password contains raw special chars (like '@')
+//    but is NOT already URL-encoded, encode it. If already encoded (%40 etc.),
+//    leave it as-is to avoid double-encoding.
+// 2. PgBouncer params: append ?pgbouncer=true&statement_cache_size=0 if not
+//    already present. Required for Supabase pooler (port 6543) which doesn't
+//    support prepared statements in transaction mode.
 
-function encodePasswordInUrl(url: string): string {
-  const schemeMatch = url.match(/^(postgresql:\/\/)(.+)$/)
-  if (!schemeMatch) return url
-  const [, scheme, afterScheme] = schemeMatch
-  const lastAt = afterScheme.lastIndexOf('@')
-  if (lastAt === -1) return url
-  const userinfo = afterScheme.substring(0, lastAt)
-  const hostpart = afterScheme.substring(lastAt + 1)
-  const colonIdx = userinfo.indexOf(':')
-  if (colonIdx === -1) return url
-  const user = userinfo.substring(0, colonIdx)
-  const password = userinfo.substring(colonIdx + 1)
-  const encodedPassword = encodeURIComponent(password)
-  return `${scheme}${user}:${encodedPassword}@${hostpart}`
+function needsEncoding(password: string): boolean {
+  // If password has raw special chars that need encoding (@, #, ?, /, etc.)
+  // AND doesn't already have encoded sequences (%XX), it needs encoding.
+  const hasRawSpecial = /[@#$&?\/\s]/.test(password)
+  const hasEncoded = /%[0-9A-Fa-f]{2}/.test(password)
+  return hasRawSpecial && !hasEncoded
 }
 
-function buildDatasourceUrl(): string {
-  const url = process.env.DATABASE_URL || ''
+function processDatabaseUrl(url: string): string {
   if (!url) return url
-  let result = encodePasswordInUrl(url)
-  if (!result.includes('pgbouncer=')) {
-    const separator = result.includes('?') ? '&' : '?'
-    result = `${result}${separator}pgbouncer=true&statement_cache_size=0`
+
+  // Step 1: If URL already has pgbouncer param, assume it's fully configured
+  // by the operator — use as-is.
+  if (url.includes('pgbouncer=')) return url
+
+  // Step 2: Encode password if needed
+  const schemeMatch = url.match(/^(postgresql:\/\/)(.+)$/)
+  if (schemeMatch) {
+    const [, scheme, afterScheme] = schemeMatch
+    const lastAt = afterScheme.lastIndexOf('@')
+    if (lastAt !== -1) {
+      const userinfo = afterScheme.substring(0, lastAt)
+      const hostpart = afterScheme.substring(lastAt + 1)
+      const colonIdx = userinfo.indexOf(':')
+      if (colonIdx !== -1) {
+        const user = userinfo.substring(0, colonIdx)
+        let password = userinfo.substring(colonIdx + 1)
+        if (needsEncoding(password)) {
+          password = encodeURIComponent(password)
+        }
+        url = `${scheme}${user}:${password}@${hostpart}`
+      }
+    }
   }
-  return result
+
+  // Step 3: Append pgbouncer params
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}pgbouncer=true&statement_cache_size=0`
 }
 
-// Override process.env.DATABASE_URL with the fixed version BEFORE PrismaClient init.
-// This is the most reliable way — Prisma's env var lookup happens at init time.
-const fixedUrl = buildDatasourceUrl()
-if (fixedUrl && fixedUrl !== process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = fixedUrl
+const datasourceUrl = processDatabaseUrl(process.env.DATABASE_URL || '')
+
+// Override process.env.DATABASE_URL BEFORE PrismaClient init.
+if (datasourceUrl && datasourceUrl !== process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = datasourceUrl
 }
 
 export const db =
