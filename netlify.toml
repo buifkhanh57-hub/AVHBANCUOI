@@ -1,0 +1,45 @@
+# Netlify deployment configuration for AVH Store (Next.js 16).
+#
+# This file is intentionally MINIMAL — Netlify's Next.js runtime plugin
+# auto-detects the framework and bundles each route + API handler as an
+# individual serverless function. We only configure:
+#   1. The build command (generates Prisma Client + z-ai config + builds Next.js)
+#   2. Node version (LTS — matches the local dev environment)
+#   3. Environment variables that should be exposed to the build (NOT secrets)
+#
+# SECRETS (DATABASE_URL, NEXTAUTH_SECRET, GOOGLE_CLIENT_SECRET, etc.) are
+# set in the Netlify dashboard (Site → Settings → Environment variables)
+# and are NOT committed here.
+
+[build]
+  command = "node scripts/setup-zai-config.js && bun run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # bun is auto-detected; if you prefer npm/pnpm, override here.
+
+# Next.js runtime plugin config (auto-installed by Netlify).
+# No explicit plugin declaration needed — Netlify's build bot auto-detects
+# `next` in package.json and installs the @netlify/nextjs plugin.
+
+# Long-running API routes (SePay webhook HMAC verification, AI chat LLM
+# call) — bump the default 10s timeout to 30s. Netlify Functions support
+# up to 26s on the free tier; 30s is the safe upper bound on Pro.
+[functions]
+  node_bundler = "esbuild"
+  # Increase the default 10s timeout for routes that do network I/O
+  # (SePay webhook verification, AI chat completion, slip upload to
+  # Cloudinary). Set per-function via `schedule` or config in dashboard
+  # if you need finer control.
+  included_files = ["prisma/schema.prisma", ".z-ai-config"]
+
+# Headers — additional security headers are also set in src/middleware.ts
+# but Netlify applies these even for static assets.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    X-DNS-Prefetch-Control = "off"

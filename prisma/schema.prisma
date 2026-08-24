@@ -1,0 +1,528 @@
+// Prisma schema for Nội Thất AVH - Furniture E-commerce.
+//
+// DATABASE PROVIDER:
+//   Production: PostgreSQL (Neon / Supabase / Railway — managed, free tier
+//   is sufficient for an e-commerce store). Set DATABASE_URL to a
+//   postgresql:// connection string.
+//
+//   Local dev fallback: the original code used SQLite at file:./db/custom.db.
+//   SQLite is NOT compatible with serverless deployment (Netlify, Vercel,
+//   etc.) because the filesystem is read-only + ephemeral on those
+//   platforms. To migrate existing SQLite data to PostgreSQL, run:
+//     bun run migrate:sqlite-to-postgres
+//   (See scripts/migrate-sqlite-to-postgres.js for details.)
+//
+// ARRAY FIELDS:
+//   PostgreSQL supports native arrays, but this schema keeps the original
+//   JSON-encoded string pattern (tags, specs, colors, materials) so the
+//   existing API behavior + Prisma queries are unchanged. Migration is
+//   intentionally minimal — no schema-shape changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AUTH & USERS
+// ============================================================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  phone         String?  @unique
+  name          String?
+  passwordHash  String? // null for OAuth-only accounts
+  role          String   @default("CUSTOMER") // CUSTOMER | ADMIN | STAFF
+  avatarUrl     String?
+  // comma-separated list of linked auth providers: "google,apple,email,phone"
+  authProviders String   @default("email")
+  // Loyalty program
+  loyaltyPoints Int      @default(0)
+  memberTier    String   @default("SILVER") // SILVER | GOLD | PLATINUM
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  addresses      Address[]
+  carts          Cart[]
+  orders         Order[]
+  reviews        Review[]
+  questions      Question[]
+  wishlist       Wishlist[]
+  notifications  Notification[]
+  chatSessions   ChatSession[]
+  chatMessages   ChatMessage[]
+  blogPosts      BlogPost[]
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  phone     String
+  province  String
+  district  String
+  ward      String
+  detail    String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  orders Order[]
+}
+
+// ============================================================
+// CATALOG
+// ============================================================
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  // parent for nested categories; null = top-level
+  parentId    String?
+  parent      Category? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
+  icon        String?
+  imageUrl    String?
+  // JSON array of attribute keys used for filters in this category (e.g. ["material","color","size"])
+  filterKeys  String   @default("[]")
+  createdAt   DateTime @default(now())
+
+  products Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand       String   @default("AVH")
+  description String   @default("")
+  // JSON: tags array e.g. ["modern","minimalist"]
+  tags        String   @default("[]")
+  // JSON: specs object e.g. {"Kích thước":"180x200cm","Chất liệu":"Gỗ sồi"}
+  specs       String   @default("{}")
+  // JSON: available colors ["Be","Xám","Đen"]
+  colors      String   @default("[]")
+  // JSON: available materials ["Gỗ sồi","Vải lanh"]
+  materials   String   @default("[]")
+  // base price (VND); variant price overrides
+  basePrice   Int
+  comparePrice Int?    // original price for showing discount
+  // calculated display discount percent; refreshed on save
+  discountPct Int      @default(0)
+  rating      Float    @default(0)
+  reviewCount Int      @default(0)
+  soldCount   Int      @default(0)
+  isFeatured  Boolean  @default(false)
+  isNew       Boolean  @default(false)
+  isFlashSale Boolean  @default(false)
+  published   Boolean  @default(true)
+  // AR / 3D
+  modelUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants ProductVariant[]
+  media    ProductMedia[]
+  reviews  Review[]
+  questions Question[]
+  cartItems CartItem[]
+  orderItems OrderItem[]
+  wishlist  Wishlist[]
+  flashSales FlashSale[]
+}
+
+model ProductVariant {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku       String  @unique
+  color      String?
+  material   String?
+  size       String?
+  price     Int
+  stock     Int     @default(0)
+  createdAt DateTime @default(now())
+
+  cartItems CartItem[]
+  orderItems OrderItem[]
+}
+
+model ProductMedia {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  type      String  @default("image") // image | video
+  // thumbnail for videos
+  thumbnail String?
+  // portrait/landscape orientation, used for layout
+  orientation String? // "portrait" | "landscape"
+  sortOrder Int     @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// REVIEWS & Q&A
+// ============================================================
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating    Int      // 1..5
+  title     String   @default("")
+  content   String
+  // JSON array of image urls uploaded by customer
+  images    String   @default("[]")
+  verified  Boolean  @default(false) // verified purchase
+  // shop reply
+  reply     String?
+  repliedAt DateTime?
+  status    String   @default("PUBLISHED") // PUBLISHED | HIDDEN | PENDING
+  createdAt DateTime @default(now())
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  askerName String   @default("Khách")
+  question  String
+  answer    String?
+  answeredAt DateTime?
+  status    String   @default("PUBLISHED")
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// CART
+// ============================================================
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String?  // null = guest cart (keyed by session token on client)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+  voucherCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CartItem {
+  id         String  @id @default(cuid())
+  cartId     String
+  cart       Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  quantity   Int     @default(1)
+  // snapshot price at add time for stability
+  unitPrice  Int
+  createdAt  DateTime @default(now())
+}
+
+// ============================================================
+// ORDERS & PAYMENTS
+// ============================================================
+
+model Order {
+  id          String   @id @default(cuid())
+  code        String   @unique // human-readable order code AVH-XXXXXX
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  addressId   String?
+  address     Address? @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  // snapshot of shipping info (in case address deleted)
+  shippingName String
+  shippingPhone String
+  shippingAddress String
+  // JSON array of timeline events [{status, at, note}]
+  timeline    String   @default("[]")
+  status      String   @default("PENDING") // PENDING|PROCESSING|SHIPPING|DELIVERED|CANCELLED|REFUNDED
+  // subtotal (items), shippingFee, discount, total in VND
+  subtotal    Int
+  shippingFee Int      @default(0)
+  discount    Int      @default(0)
+  total       Int
+  voucherCode String?
+  paymentMethod String  @default("COD") // COD|BANK (wallets VNPAY/MOMO/ZALOPAY removed)
+  paymentStatus String @default("UNPAID") // UNPAID|PAID|REFUNDED|PENDING_VERIFY
+  note        String?
+  // scheduled delivery/installation
+  scheduledDate String?
+  needsInstallation Boolean @default(false)
+  // JSON array of risk flags computed at creation: [{key, level, message}]
+  // e.g. [{key:'HIGH_VALUE', level:'warn', message:'Đơn giá trị cao — cần xác minh trước khi giao'}]
+  riskFlags   String   @default("[]")
+  // customer-uploaded transfer slip (url) for BANK payment verification
+  slipUrl     String?
+  slipUploadedAt DateTime?
+  // staff note added during risk review
+  reviewNote  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items           OrderItem[]
+  payments        Payment[]
+  paymentSessions PaymentSession[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  name      String  // snapshot
+  image     String  // snapshot
+  // snapshot price at purchase to keep historical integrity
+  unitPrice Int
+  quantity  Int
+  createdAt DateTime @default(now())
+}
+
+// PaymentSession — one per payment attempt. Stores the immutable snapshot of
+// the amount + payment_reference that went into the QR / provider request, so
+// the webhook can verify the callback's amount matches EXACTLY what we
+// expected. Also provides idempotency: provider_transaction_id is unique, so
+// the same webhook replayed twice will hit the unique constraint and the
+// second attempt is rejected.
+model PaymentSession {
+  id                  String    @id @default(cuid())
+  orderId             String
+  order               Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Unique per session. For BANK (VietQR) this is the order code itself; for
+  // VNPAY/MOMO/ZALOPAY it's the provider's txnRef / requestId / app_trans_id.
+  paymentReference    String    @unique
+  provider            String    // VNPAY | MOMO | ZALOPAY | BANK
+  // IMMUTABLE snapshot of the amount the customer was asked to pay. Webhook
+  // MUST report the exact same amount or we reject the payment (anti-scam).
+  amount              Int
+  currency            String    @default("VND")
+  // PENDING → SUCCESS / FAILED / EXPIRED / CANCELLED / REFUNDED
+  status              String    @default("PENDING")
+  // Unique provider transaction id — set when the webhook arrives. Unique
+  // constraint provides idempotency: a replayed webhook hits the constraint
+  // and is rejected (not double-processed).
+  providerTransactionId String?  @unique
+  // Full raw payload from the provider, kept for audit / reconciliation.
+  rawPayload          String?
+  // IMMUTABLE snapshot of the bank account info (bank code, account number,
+  // holder, branch) at the moment the order was created. Stored as JSON so
+  // the customer's QR / payment instructions stay pinned to this exact
+  // account even if the admin later changes the linked bank account in
+  // Settings. Without this, an admin bank-account change would silently
+  // invalidate QRs / payment info for every PENDING order.
+  bankAccountSnapshot String?
+  verifiedAt         DateTime?
+  // Session auto-expires after this time. Webhooks arriving after expires_at
+  // are rejected (the customer can no longer pay this session).
+  expiresAt           DateTime
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([provider])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider  String  // VNPAY|MOMO|ZALOPAY|BANK|COD
+  amount    Int
+  status    String  @default("PENDING") // PENDING|SUCCESS|FAILED|REFUNDED
+  txnRef    String?
+  // Link to the PaymentSession that this payment was settled through.
+  // Null for legacy rows / COD. Allows audit from Payment → Session → raw payload.
+  paymentSessionId String?
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// PROMOTIONS
+// ============================================================
+
+model Voucher {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  description String
+  type        String   // PERCENT | FIXED
+  value       Int      // percent (1..100) or fixed VND amount
+  minOrder    Int      @default(0)
+  maxDiscount Int?     // cap for PERCENT type
+  usageLimit  Int      @default(0) // 0 = unlimited
+  usedCount   Int      @default(0)
+  startAt     DateTime
+  endAt       DateTime
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  imageUrl  String
+  link      String?
+  // mobile vs desktop image
+  mobileImageUrl String?
+  sortOrder Int      @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model FlashSale {
+  id        String   @id @default(cuid())
+  name      String
+  startAt   DateTime
+  endAt     DateTime
+  active    Boolean  @default(true)
+  products  Product[]
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// WISHLIST & NOTIFICATIONS
+// ============================================================
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([userId, productId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // ORDER|PROMO|REPLY|SYSTEM|CHAT
+  title     String
+  body      String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// AI CHAT (Trợ Lý AVH)
+// ============================================================
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  // anonymous guest token (stored client-side)
+  guestToken String?
+  status    String   @default("ACTIVE") // ACTIVE | HANDED_OFF | CLOSED
+  // summary/context carried between turns
+  context   String   @default("{}")
+  messages  ChatMessage[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role      String   // user | assistant | system
+  content   String
+  // tokens used (for monitoring)
+  tokens    Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// BLOG (SEO + tips)
+// ============================================================
+
+model BlogPost {
+  id        String   @id @default(cuid())
+  title     String
+  slug      String   @unique
+  excerpt   String
+  content   String
+  coverUrl  String
+  authorId  String?
+  author    User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  tags      String   @default("[]")
+  published Boolean  @default(true)
+  views     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// SITE SETTINGS — key/value store for everything admin-configurable
+// (brand name, logo, hotline, social links, announcement bar,
+// trust badges, shipping policy text, copyright, etc.)
+// ============================================================
+
+model Setting {
+  key       String   @id
+  value     String   @default("")
+  // optional human label for the admin UI
+  label     String?
+  group     String   @default("general") // general|branding|contact|social|announcement|shipping|footer
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// SYSTEM LOG — audit trail for admin panel
+// ============================================================
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     String   @default("info") // info | warn | error
+  category  String   @default("system") // product | order | payment | settings | auth | system
+  message   String
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+// ============================================================
+// FILE BACKUPS — created by the AI Dev Agent before editing source files.
+// Originally stored as files in .backups/, migrated to DB so they survive
+// serverless deploys (Netlify / Vercel — read-only / ephemeral FS).
+// Used only by the admin's "Restore backup" feature (web-update-log route).
+// ============================================================
+
+model FileBackup {
+  id           String   @id @default(cuid())
+  // Original source path (relative to project root), e.g. "src/lib/ai-agent.ts"
+  originalPath String
+  // ISO timestamp of when the backup was created (also encoded in old filename format)
+  timestamp    DateTime @default(now())
+  // Backup content (UTF-8 text). Large files (binary) are NOT stored this way.
+  content      String
+  // First 500 chars — for admin UI preview without loading full content
+  preview      String   @default("")
+  // File size in bytes (length of `content`)
+  size         Int      @default(0)
+  // Who created this backup (usually the AI Dev Agent user)
+  createdBy    String   @default("ai-dev-agent")
+
+  @@index([originalPath])
+  @@index([timestamp])
+}

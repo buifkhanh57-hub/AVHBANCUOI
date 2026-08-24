@@ -1,0 +1,28 @@
+OK coffee-table.png 59787 bytes
+OK tv-stand.png 43036 bytes
+OK floor-lamp.png 34411 bytes
+OK rug-pattern.png 148860 bytes
+OK nightstand.png 43007 bytes
+OK dining-chair.png 86441 bytes
+OK office-desk.png 48374 bytes
+FAIL hero-1.png (non-429 error)
+      at createImageGeneration (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/index.js:265:27)
+      at async handleImage (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:716:54)
+      at async main (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:1077:23)
+
+❌ Error: API request failed with status 400: {"error":{"code":"1214","message":"size的长宽均需满足512px-2880px之间,且为32整数倍,并保证最大像素数不超过2^22px"}}
+FAIL hero-2.png (non-429 error)
+      at createImageGeneration (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/index.js:265:27)
+      at async handleImage (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:716:54)
+      at async main (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:1077:23)
+
+❌ Error: API request failed with status 400: {"error":{"code":"1214","message":"size的长宽均需满足512px-2880px之间,且为32整数倍,并保证最大像素数不超过2^22px"}}
+FAIL hero-3.png (non-429 error)
+      at createImageGeneration (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/index.js:265:27)
+      at async handleImage (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:716:54)
+      at async main (/home/z/.bun/install/global/node_modules/z-ai-web-dev-sdk/dist/cli.js:1077:23)
+
+❌ Error: API request failed with status 400: {"error":{"code":"1214","message":"size的长宽均需满足512px-2880px之间,且为32整数倍,并保证最大像素数不超过2^22px"}}
+OK cat-living.png 82327 bytes
+OK cat-bedroom.png 37142 bytes
+OK cat-dining.png 68460 bytes
