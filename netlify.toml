@@ -5,7 +5,10 @@
 # individual serverless function. We only configure:
 #   1. The build command (generates Prisma Client + z-ai config + builds Next.js)
 #   2. Node version (LTS — matches the local dev environment)
-#   3. Environment variables that should be exposed to the build (NOT secrets)
+#   3. Secrets scanning exemption for ZAI_API_KEY + ZAI_BASE_URL
+#      (these are placeholder values until the operator sets real keys
+#      from the z.ai dashboard — `Z.ai` is NOT a real secret, it's the
+#      placeholder default in /etc/.z-ai-config)
 #
 # SECRETS (DATABASE_URL, NEXTAUTH_SECRET, GOOGLE_CLIENT_SECRET, etc.) are
 # set in the Netlify dashboard (Site → Settings → Environment variables)
@@ -18,23 +21,31 @@
 [build.environment]
   NODE_VERSION = "20"
   # bun is auto-detected; if you prefer npm/pnpm, override here.
+  #
+  # SECRETS SCANNING:
+  # ZAI_API_KEY and ZAI_BASE_URL are referenced by name in source code
+  # (src/lib/ai-agent.ts, scripts/setup-zai-config.js) and in .env.example.
+  # The current placeholder value "Z.ai" is NOT a real secret — it's the
+  # default in /etc/.z-ai-config that we copied to the Netlify env vars.
+  # Netlify's secrets scanner flags any occurrence of the env var's value
+  # in source files, which fails the build.
+  #
+  # We omit these two keys from scanning. When the operator sets a real
+  # ZAI_API_KEY later, they should:
+  #   1. Replace the placeholder value in Netlify env vars.
+  #   2. Remove ZAI_API_KEY from SECRETS_SCAN_OMIT_KEYS below so the
+  #      scanner can catch accidental leaks of the real key.
+  SECRETS_SCAN_OMIT_KEYS = "ZAI_API_KEY,ZAI_BASE_URL"
 
 # Next.js runtime plugin config (auto-installed by Netlify).
 # No explicit plugin declaration needed — Netlify's build bot auto-detects
 # `next` in package.json and installs the @netlify/nextjs plugin.
 
-# Long-running API routes (SePay webhook HMAC verification, AI chat LLM
-# call) — bump the default 10s timeout to 30s. Netlify Functions support
-# up to 26s on the free tier; 30s is the safe upper bound on Pro.
 [functions]
   node_bundler = "esbuild"
-  # Increase the default 10s timeout for routes that do network I/O
-  # (SePay webhook verification, AI chat completion, slip upload to
-  # Cloudinary). Set per-function via `schedule` or config in dashboard
-  # if you need finer control.
   included_files = ["prisma/schema.prisma", ".z-ai-config"]
 
-# Headers — additional security headers are also set in src/middleware.ts
+# Security headers — additional headers are also set in src/middleware.ts
 # but Netlify applies these even for static assets.
 [[headers]]
   for = "/*"
