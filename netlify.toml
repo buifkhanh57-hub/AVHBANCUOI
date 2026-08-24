@@ -30,12 +30,15 @@
   # Netlify's secrets scanner flags any occurrence of the env var's value
   # in source files, which fails the build.
   #
-  # We omit these two keys from scanning. When the operator sets a real
-  # ZAI_API_KEY later, they should:
-  #   1. Replace the placeholder value in Netlify env vars.
-  #   2. Remove ZAI_API_KEY from SECRETS_SCAN_OMIT_KEYS below so the
-  #      scanner can catch accidental leaks of the real key.
-  SECRETS_SCAN_OMIT_KEYS = "ZAI_API_KEY,ZAI_BASE_URL"
+  # GROQ_API_KEY is also added here because the source references Groq's
+  # default model name "groq/compound" and base URL — these are public
+  # constants, not secrets.
+  #
+  # When the operator sets real API keys later, they should:
+  #   1. Replace placeholder values in Netlify env vars.
+  #   2. Remove these keys from SECRETS_SCAN_OMIT_KEYS so the scanner
+  #      can catch accidental leaks of the real keys.
+  SECRETS_SCAN_OMIT_KEYS = "ZAI_API_KEY,ZAI_BASE_URL,GROQ_API_KEY,GROQ_BASE_URL,GROQ_MODEL"
 
 # Next.js runtime plugin config (auto-installed by Netlify).
 # No explicit plugin declaration needed — Netlify's build bot auto-detects

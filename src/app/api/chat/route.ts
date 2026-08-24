@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import ZAI from 'z-ai-web-dev-sdk'
+import { chatCompletion, detectBackend } from '@/lib/ai-client'
 import { buildChatContext, type ChatProductCard } from '@/lib/chat-context'
 
 /**
@@ -9,6 +9,13 @@ import { buildChatContext, type ChatProductCard } from '@/lib/chat-context'
  * never leaves the server; the client only sends the user message + recent
  * history. We rate-limit per session in-memory (simple) and cap history
  * length to control token cost.
+ *
+ * BACKEND SELECTION:
+ * - Groq (preferred): if GROQ_API_KEY env var is set. Uses OpenAI-compatible
+ *   Groq API endpoint. Default model: groq/compound (supports tools).
+ * - z.ai SDK (fallback): if ZAI_API_KEY env var is set + .z-ai-config exists.
+ *   Used in the original AVH sandbox environment.
+ * - If neither is configured → returns a fallback reply (chatbot disabled).
  */
 
 // In-memory rate limit per guest token / IP. Resets every 60s. 15 msgs/min.
@@ -78,13 +85,6 @@ const FALLBACK_REPLIES = [
   'Hệ thống đang cập nhật. Vui lòng thử lại sau, hoặc tham khảo mục Câu hỏi thường gặp trên trang chủ. Cảm ơn anh/chị!',
 ]
 
-// Singleton ZAI instance for performance
-let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null
-async function getZAI() {
-  if (!zaiInstance) zaiInstance = await ZAI.create()
-  return zaiInstance
-}
-
 interface ChatMessageIn {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -128,17 +128,14 @@ export async function POST(req: NextRequest) {
       { role: 'user', content: message },
     ]
 
-    const zai = await getZAI()
     let reply = ''
     try {
-      const completion = await zai.chat.completions.create({
-        messages,
-        thinking: { type: 'disabled' },
+      const result = await chatCompletion(messages, {
+        temperature: 1,
+        maxTokens: 2048,
       })
-      reply = completion.choices?.[0]?.message?.content?.trim() || ''
+      reply = result.reply
     } catch (err) {
-      // Fallback: pick a deterministic-ish reply (first) so user always sees
-      // something. In a richer setup we'd try a backup model here.
       console.error('[chat] LLM error', err)
       reply = FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)]
     }

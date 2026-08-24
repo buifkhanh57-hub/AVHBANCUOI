@@ -37,6 +37,7 @@
 // shell exec) — that's why it's locked to ONE hardcoded email.
 
 import ZAI from 'z-ai-web-dev-sdk'
+import { chatCompletion, detectBackend } from '@/lib/ai-client'
 import { exec } from 'child_process'
 import { promises as fs } from 'fs'
 import * as path from 'path'
@@ -116,8 +117,11 @@ export async function runAgent(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   options?: { model?: string; thinking?: boolean }
 ): Promise<AgentResult> {
-  const zai = await ZAI.create()
-  const model = options?.model || 'glm-5.2'
+  // Choose AI backend — Groq (preferred) or z.ai (sandbox fallback).
+  // The agent uses the same backend as the customer-facing chat endpoint
+  // so configuration is centralized in src/lib/ai-client.ts.
+  const backend = detectBackend()
+  const model = options?.model || (backend === 'groq' ? (process.env.GROQ_MODEL || 'groq/compound') : 'glm-5.2')
   const thinking = options?.thinking ?? true
 
   // ── AUTO-READ FILES mentioned in the user's message ────────────────
@@ -150,15 +154,32 @@ export async function runAgent(
     { role: 'user', content: augmentedMessage },
   ]
 
-  // Use the selected Z.ai model. If the SDK doesn't recognize the model
-  // name, it falls back to the default model silently.
-  const completion = await zai.chat.completions.create({
-    model,
-    messages: messages as any,
-    thinking: { type: thinking ? 'enabled' : 'disabled' },
-  })
+  // Use the configured AI backend (Groq preferred, z.ai fallback).
+  // The thinking flag is only honored by the z.ai SDK; Groq ignores it.
+  let reply = ''
+  try {
+    if (backend === 'groq') {
+      const result = await chatCompletion(messages as any, {
+        model,
+        temperature: thinking ? 0.7 : 1,
+        maxTokens: 4096,
+      })
+      reply = result.reply
+    } else {
+      // z.ai SDK — supports `thinking` parameter
+      const zai = await ZAI.create()
+      const completion = await zai.chat.completions.create({
+        model,
+        messages: messages as any,
+        thinking: { type: thinking ? 'enabled' : 'disabled' },
+      })
+      reply = completion.choices[0]?.message?.content || '(no response)'
+    }
+  } catch (err) {
+    reply = `(AI error: ${err instanceof Error ? err.message : 'unknown'})`
+  }
 
-  const reply = completion.choices[0]?.message?.content || '(no response)'
+  if (!reply) reply = '(no response)'
   const actions = await parseAndExecuteActions(reply)
 
   return { reply, actions }
