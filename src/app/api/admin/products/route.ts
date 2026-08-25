@@ -1,8 +1,101 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { slugify } from '@/lib/format'
+import { parseJSON, slugify } from '@/lib/format'
 import { logInfo, logWarn } from '@/lib/system-log'
 import { adminGuard } from '@/lib/middleware/admin-guard'
+
+/**
+ * GET /api/admin/products — admin-scoped product list (includes unpublished).
+ * Query params: page, limit, q (search), categoryId, lowStock=true.
+ * Returns products with category + first media + variant stock info.
+ */
+export async function GET(req: NextRequest) {
+  const auth = await adminGuard(req)
+  if (auth instanceof NextResponse) return auth
+
+  try {
+    const sp = req.nextUrl.searchParams
+    const page = Math.max(1, Number(sp.get('page') || 1))
+    const limit = Math.min(100, Math.max(1, Number(sp.get('limit') || 60)))
+    const q = sp.get('q')?.trim() || ''
+    const categoryId = sp.get('categoryId') || undefined
+    const lowStockOnly = sp.get('lowStock') === 'true'
+
+    const where: Record<string, unknown> = {}
+    if (categoryId) where['categoryId'] = categoryId
+    if (q) {
+      where['OR'] = [
+        { name: { contains: q } },
+        { brand: { contains: q } },
+        { slug: { contains: q } },
+      ]
+    }
+
+    const [total, rows] = await Promise.all([
+      db.product.count({ where }),
+      db.product.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          category: { select: { id: true, name: true, slug: true } },
+          media: { orderBy: { sortOrder: 'asc' }, take: 1, select: { url: true } },
+          variants: { select: { stock: true, price: true }, take: 1 },
+        },
+      }),
+    ])
+
+    const items = rows.map((p) => {
+      const variant = p.variants[0]
+      const stock = variant?.stock ?? 0
+      return {
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        brand: p.brand,
+        basePrice: p.basePrice,
+        comparePrice: p.comparePrice,
+        discountPct: p.discountPct,
+        rating: p.rating,
+        reviewCount: p.reviewCount,
+        soldCount: p.soldCount,
+        isFeatured: p.isFeatured,
+        isNew: p.isNew,
+        isFlashSale: p.isFlashSale,
+        published: p.published,
+        stock,
+        inStock: stock > 0,
+        lowStock: stock > 0 && stock <= 5,
+        category: p.category,
+        image: p.media[0]?.url ?? '/products/placeholder.png',
+        tags: parseJSON<string[]>(p.tags, []),
+        colors: parseJSON<string[]>(p.colors, []),
+        materials: parseJSON<string[]>(p.materials, []),
+        createdAt: p.createdAt,
+      }
+    })
+
+    const filtered = lowStockOnly ? items.filter((p) => p.lowStock) : items
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        items: filtered,
+        total: lowStockOnly ? filtered.length : total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil((lowStockOnly ? filtered.length : total) / limit)),
+      },
+    })
+  } catch (err) {
+    console.error('[admin/products] GET error:', err)
+    return NextResponse.json(
+      { success: false, error: 'Không thể tải danh sách sản phẩm' },
+      { status: 500 }
+    )
+  }
+}
 
 /**
  * POST /api/admin/products — create a product.

@@ -67,7 +67,10 @@ export const SETTING_DEFS: SettingDef[] = [
   // bank_accounts is a JSON array but we cap at 1 entry in the manager UI.
   // Each entry: { id, bank, bankCode, accountNumber, holder, branch?, qrUrl? }
   // qrUrl = admin-uploaded STATIC QR (QR #1). VietQR auto-generated = QR #2.
-  { key: 'payment_bank_accounts', label: 'Tài khoản ngân hàng (JSON, tối đa 1)', group: 'payment', type: 'textarea', defaultValue: '[]', help: 'Dạng JSON: [{"bank":"Vietcombank","bankCode":"vcb","accountNumber":"0331001008999","holder":"CONG TY NOI THAT AVH","branch":"CN TP.HCM","qrUrl":"/uploads/..."}]. Chỉ dùng 1 tài khoản.' },
+  // DEFAULT value ships with a sensible placeholder (Vietcombank / 0123456789 /
+  // NỘI THẤT AVH) so checkout works out-of-the-box before the admin configures
+  // their own account. The admin can replace it via Settings → Payment.
+  { key: 'payment_bank_accounts', label: 'Tài khoản ngân hàng (JSON, tối đa 1)', group: 'payment', type: 'textarea', defaultValue: JSON.stringify([{ bank: 'Vietcombank', bankCode: 'vcb', accountNumber: '0123456789', holder: 'NỘI THẤT AVH', branch: 'CN TP.HCM' }]), help: 'Dạng JSON: [{"bank":"Vietcombank","bankCode":"vcb","accountNumber":"0331001008999","holder":"CONG TY NOI THAT AVH","branch":"CN TP.HCM","qrUrl":"/uploads/..."}]. Chỉ dùng 1 tài khoản.' },
   { key: 'payment_vnpay_merchant', label: 'Mã merchant VNPay (TMN Code)', group: 'payment', type: 'text', defaultValue: '' },
   { key: 'payment_transfer_instructions', label: 'Hướng dẫn chuyển khoản', group: 'payment', type: 'textarea', defaultValue: 'Quý khách vui lòng chuyển khoản đúng số tiền và ghi rõ mã đơn hàng ở phần nội dung. Sau khi chuyển, nhấn nút "Tôi đã chuyển khoản" để hệ thống tự động xác nhận.' },
 ]
@@ -96,7 +99,16 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   const map: Record<string, string> = {}
   for (const def of SETTING_DEFS) {
     const row = rows.find((r) => r.key === def.key)
-    map[def.key] = row?.value != null && row.value !== '' ? row.value : def.defaultValue
+    let value = row?.value != null && row.value !== '' ? row.value : def.defaultValue
+    // MIGRATION: payment_bank_accounts used to default to '[]' (empty array).
+    // If the DB still has that stale empty value, substitute the new default
+    // (a sensible placeholder Vietcombank account) so checkout works
+    // out-of-the-box. When the admin saves their own account, the DB row
+    // becomes a non-empty JSON array and this branch no longer triggers.
+    if (def.key === 'payment_bank_accounts' && value === '[]') {
+      value = def.defaultValue
+    }
+    map[def.key] = value
   }
   return map
 }
@@ -108,6 +120,18 @@ export async function seedSettings() {
     if (!exists) {
       await db.setting.create({
         data: { key: def.key, value: def.defaultValue, label: def.label, group: def.group },
+      })
+    } else if (
+      // MIGRATION: if the existing row has the OLD empty default ('[]' for
+      // payment_bank_accounts), upgrade it to the new placeholder default.
+      // This is a one-time migration — once the row has the new default (or
+      // the admin saves their own value), this branch stops triggering.
+      def.key === 'payment_bank_accounts' &&
+      exists.value === '[]'
+    ) {
+      await db.setting.update({
+        where: { key: def.key },
+        data: { value: def.defaultValue },
       })
     }
   }

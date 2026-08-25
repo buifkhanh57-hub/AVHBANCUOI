@@ -50,8 +50,19 @@ const DEFAULTS: Record<string, string> = {
   support_subtext: 'Trợ Lý AVH',
   footer_about: 'Nội Thất AVH chuyên cung cấp nội thất và phụ kiện trang trí nhà cửa.',
   footer_copyright: 'Nội Thất AVH. Đã đăng ký bản quyền.',
-  footer_payment_methods: 'VNPay,MoMo,ZaloPay,Visa,Mastercard,COD',
-  payment_bank_accounts: '[]',
+  footer_payment_methods: 'Chuyển khoản ngân hàng,Visa,Mastercard,COD',
+  // DEFAULT bank account — so checkout works out-of-the-box even before the
+  // admin configures their own account. Vietcombank / 0123456789 / NỘI THẤT AVH
+  // is a sensible placeholder that the admin can replace via Settings → Payment.
+  // Once the admin saves a real account, this default is overwritten in DB
+  // (and the settings-store pulls the latest from /api/admin/settings on mount).
+  payment_bank_accounts: JSON.stringify([{
+    bank: 'Vietcombank',
+    bankCode: 'vcb',
+    accountNumber: '0123456789',
+    holder: 'NỘI THẤT AVH',
+    branch: 'CN TP.HCM',
+  }]),
   payment_momo_number: '',
   payment_momo_holder: '',
   payment_momo_qr: '',
